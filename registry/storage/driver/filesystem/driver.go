@@ -224,6 +224,41 @@ func (d *driver) Move(ctx context.Context, sourcePath string, destPath string) e
 	}
 
 	err := os.Rename(source, dest)
+	// os.Rename will not work across devices, in that case, try to copy then delete instead
+	if err != nil {
+		err = d.copyFile(source, dest)
+		// If we just moved an uploaded blob, the PurgeUploads loop probably removed it already,
+		// therefore we must check if the source file still exists before trying to delete it
+		if _, err := os.Stat(source); err == nil {
+			if err = os.RemoveAll(source); err != nil {
+				return err
+			}
+		}
+	}
+	return err
+}
+
+// copy a file to another
+func (d *driver) copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		cerr := out.Close()
+		if err == nil {
+			err = cerr
+		}
+	}()
+	if _, err = io.Copy(out, in); err != nil {
+		return err
+	}
+	err = out.Sync()
 	return err
 }
 
